@@ -1,54 +1,179 @@
 name: Build Android APK
-
-on:
-  workflow_dispatch:
-  push:
-    paths:
-      - 'AcadnoxERP_Project.zip'
-      - '.github/workflows/build-apk.yml'
-
+on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK
-        run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
-
-      - name: Install Gradle
-        run: |
-          curl -L https://services.gradle.org/distributions/gradle-8.7-bin.zip -o gradle.zip
-          unzip -q gradle.zip
-          echo "$GITHUB_WORKSPACE/gradle-8.7/bin" >> "$GITHUB_PATH"
-
-      - name: Extract project
-        run: |
-          mkdir project
-          unzip -q AcadnoxERP_Project.zip -d project
-          PROJECT_DIR=$(find "$GITHUB_WORKSPACE/project" -name settings.gradle -printf '%h\n' | head -n 1)
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      - name: Build APK
-        run: |
-          cd "$PROJECT_DIR"
-          gradle assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          name: AcadnoxERP-APK
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          gradle-version: 8.7
+      - name: Create project and build
+        run: |
+          set -e
+          mkdir -p proj && cd proj
+          mkdir -p .
+          cat > settings.gradle <<'ACX_EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "AcadnoxERP"
+          include ':app'
+          ACX_EOF
+          mkdir -p .
+          cat > build.gradle <<'ACX_EOF'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          ACX_EOF
+          mkdir -p .
+          cat > gradle.properties <<'ACX_EOF'
+          org.gradle.jvmargs=-Xmx2048m
+          android.useAndroidX=true
+          ACX_EOF
+          mkdir -p app
+          cat > app/build.gradle <<'ACX_EOF'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'com.acadnox.erp'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.acadnox.erp"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes { release { minifyEnabled false } }
+              compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+          }
+          ACX_EOF
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'ACX_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:label="Acadnox ERP"
+                  android:icon="@android:drawable/sym_def_app_icon"
+                  android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"
+                  android:allowBackup="true">
+                  <activity android:name=".MainActivity" android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          ACX_EOF
+          mkdir -p app/src/main/java/com/acadnox/erp
+          cat > app/src/main/java/com/acadnox/erp/MainActivity.java <<'ACX_EOF'
+          package com.acadnox.erp;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+              private WebView web;
+
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  web = new WebView(this);
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  web.setWebViewClient(new WebViewClient());
+                  web.setWebChromeClient(new WebChromeClient());
+                  setContentView(web);
+                  web.loadUrl("file:///android_asset/index.html");
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (web.canGoBack()) web.goBack(); else super.onBackPressed();
+              }
+          }
+          ACX_EOF
+          mkdir -p app/src/main/assets
+          cat > app/src/main/assets/index.html <<'ACX_EOF'
+          <!DOCTYPE html>
+          <html lang="en"><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+          <title>Acadnox ERP</title>
+          <style>
+          :root{--p:#1d4ed8;--bg:#f3f5f9;--c:#fff;--t:#111827;--m:#6b7280;--b:#e5e7eb;--r:#dc2626;--g:#16a34a}
+          @media(prefers-color-scheme:dark){:root{--bg:#0f1115;--c:#1a1d24;--t:#e8eaed;--m:#9aa0aa;--b:#2b2f38}}
+          *{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--t);padding-top:env(safe-area-inset-top)}
+          header{background:var(--p);color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center}
+          header b{font-size:17px}header button{background:#fff3;color:#fff;border:0;border-radius:8px;padding:6px 10px}
+          main{padding:12px 12px 80px}.card{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:12px;margin-bottom:10px}
+          h3{margin:0 0 8px}.row{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--b)}.row:first-of-type{border:0}
+          .m{color:var(--m);font-size:13px}input,select{width:100%;padding:10px;margin:4px 0 8px;border:1px solid var(--b);border-radius:8px;background:var(--bg);color:var(--t);font-size:15px}
+          button.b{background:var(--p);color:#fff;border:0;border-radius:8px;padding:10px 14px;font-size:15px}button.s{background:var(--b);color:var(--t)}button.d{background:var(--r)}
+          nav{position:fixed;bottom:0;left:0;right:0;display:flex;overflow-x:auto;background:var(--c);border-top:1px solid var(--b);padding-bottom:env(safe-area-inset-bottom)}
+          nav a{flex:1;min-width:76px;text-align:center;padding:12px 6px;font-size:13px;color:var(--m)}nav a.on{color:var(--p);font-weight:600}
+          .k{display:grid;grid-template-columns:1fr 1fr;gap:10px}.k div{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:12px}.k b{font-size:24px;display:block}
+          .P{background:var(--g)}.A{background:var(--r)}.tg{color:#fff;border:0;border-radius:6px;padding:6px 12px;min-width:44px}
+          #modal{position:fixed;inset:0;background:#0008;display:none;align-items:center;padding:16px}#modal .card{width:100%;max-height:90%;overflow:auto}
+          </style></head><body><div id="app"></div><div id="modal"></div>
+          <script>
+          const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+          const uid=()=>Math.random().toString(36).slice(2,9),today=()=>new Date().toISOString().slice(0,10);
+          const seed=()=>({students:[{id:'s1',name:'Aarav Sharma',roll:'CS001',course:'B.Tech CSE',sem:3,phone:'9000000001',guardian:'Rakesh Sharma',fee:85000,paid:60000},{id:'s2',name:'Diya Verma',roll:'CS002',course:'B.Tech CSE',sem:3,phone:'9000000002',guardian:'Sunil Verma',fee:85000,paid:85000}],
+          faculty:[{id:'f1',name:'Dr. R. Singh',dept:'CSE',subject:'Data Structures',phone:'9111111111'}],att:{},marks:[{id:uid(),sid:'s1',sem:2,subject:'Maths',credits:4,marks:78},{id:uid(),sid:'s1',sem:2,subject:'Physics',credits:3,marks:85}],
+          tt:[{id:uid(),day:'Mon',time:'09:00',subject:'Data Structures',room:'A-101',faculty:'Dr. R. Singh'}],notices:[{id:uid(),t:'Welcome to Acadnox ERP',d:today()}]});
+          let S=JSON.parse(localStorage.getItem('acx')||'null')||seed(),U=null,V='dash';
+          const save=()=>localStorage.setItem('acx',JSON.stringify(S));
+          const gp=m=>m>=90?10:m>=80?9:m>=70?8:m>=60?7:m>=50?6:m>=40?5:0;
+          const gpa=l=>{const c=l.reduce((a,x)=>a+ +x.credits,0);return c?(l.reduce((a,x)=>a+gp(+x.marks)*x.credits,0)/c).toFixed(2):'-'};
+          const attPct=sid=>{const d=Object.values(S.att);const t=d.filter(x=>x[sid]).length,p=d.filter(x=>x[sid]==='P').length;return t?Math.round(p*100/t):null};
+          const stu=id=>S.students.find(s=>s.id===id)||{name:'?'};
+          const NAV={admin:[['dash','Home'],['students','Students'],['faculty','Faculty'],['att','Attendance'],['marks','Results'],['tt','Timetable'],['notices','Notices']],
+          faculty:[['dash','Home'],['att','Attendance'],['marks','Results'],['tt','Timetable'],['notices','Notices']],
+          student:[['dash','Home'],['my','My Profile'],['tt','Timetable'],['notices','Notices']]};
+          function form(title,f,cb){const m=$('#modal');m.style.display='flex';m.innerHTML=`<div class="card"><h3>${title}</h3>${f.map(([k,l,t,o])=>`<label class="m">${l}</label>`+(t==='select'?`<select id="f_${k}">${o.map(x=>`<option value="${esc(x[0])}">${esc(x[1])}</option>`).join('')}</select>`:`<input id="f_${k}" type="${t||'text'}">`)).join('')}<button class="b" id="ok">Save</button> <button class="b s" id="no">Cancel</button></div>`;
+          $('#no').onclick=()=>m.style.display='none';$('#ok').onclick=()=>{const v={};f.forEach(([k])=>v[k]=$('#f_'+k).value.trim());if(f.some(([k,,t])=>t!=='select'&&!v[k]))return alert('Fill all fields');cb(v);save();m.style.display='none';render()}}
+          function del(arr,id){if(confirm('Delete this record?')){S[arr]=S[arr].filter(x=>x.id!==id);save();render()}}
+          function login(){$('#app').innerHTML=`<header><b>Acadnox ERP</b></header><main><div class="card"><h3>Sign in</h3><label class="m">Username (admin / faculty / student roll no.)</label><input id="u"><label class="m">Password</label><input id="p" type="password"><button class="b" id="go">Login</button><p class="m">Demo: admin/admin123 · faculty/faculty123 · CS001/student123</p></div></main>`;
+          $('#go').onclick=()=>{const u=$('#u').value.trim(),p=$('#p').value;
+          if(u==='admin'&&p==='admin123')U={role:'admin',name:'Administrator'};else if(u==='faculty'&&p==='faculty123')U={role:'faculty',name:'Faculty'};
+          else{const s=S.students.find(x=>x.roll.toLowerCase()===u.toLowerCase());if(s&&p==='student123')U={role:'student',name:s.name,sid:s.id}}
+          if(!U)return alert('Invalid login');V='dash';render()}}
+          const V_={
+          dash(){const a=S.students.map(s=>attPct(s.id)).filter(x=>x!==null),avg=a.length?Math.round(a.reduce((x,y)=>x+y,0)/a.length):'-',due=S.students.reduce((x,s)=>x+s.fee-s.paid,0);
+          return `<div class="k"><div><b>${S.students.length}</b>Students</div><div><b>${S.faculty.length}</b>Faculty</div><div><b>${avg}${avg==='-'?'':'%'}</b>Avg attendance</div><div><b>₹${due.toLocaleString('en-IN')}</b>Fees due</div></div><div class="card" style="margin-top:10px"><h3>Latest notices</h3>${S.notices.slice(-3).reverse().map(n=>`<div class="row"><span>${esc(n.t)}</span><span class="m">${n.d}</span></div>`).join('')||'<span class="m">None</span>'}</div>`},
+          students(){return `<button class="b" onclick="addStu()">+ Add student</button><div class="card" style="margin-top:10px">${S.students.map(s=>`<div class="row"><div>${esc(s.name)}<div class="m">${esc(s.roll)} · ${esc(s.course)} · Sem ${s.sem}<br>Guardian: ${esc(s.guardian)} · ${esc(s.phone)}<br>Fees: ₹${s.paid}/${s.fee}</div></div><button class="b d" onclick="del('students','${s.id}')">✕</button></div>`).join('')}</div>`},
+          faculty(){return `<button class="b" onclick="addFac()">+ Add faculty</button><div class="card" style="margin-top:10px">${S.faculty.map(f=>`<div class="row"><div>${esc(f.name)}<div class="m">${esc(f.dept)} · ${esc(f.subject)} · ${esc(f.phone)}</div></div><button class="b d" onclick="del('faculty','${f.id}')">✕</button></div>`).join('')}</div>`},
+          att(){window.AD=window.AD||today();const d=S.att[AD]||{};return `<div class="card"><label class="m">Date</label><input type="date" value="${AD}" onchange="AD=this.value;render()">${S.students.map(s=>`<div class="row"><span>${esc(s.name)}<div class="m">${esc(s.roll)} · ${attPct(s.id)??'-'}%${attPct(s.id)!==null&&attPct(s.id)<75?' ⚠ shortage':''}</div></span><button class="tg ${d[s.id]==='A'?'A':'P'}" onclick="mark('${s.id}','${d[s.id]==='A'?'P':'A'}')">${d[s.id]||'P'}</button></div>`).join('')}<button class="b" style="margin-top:8px" onclick="saveAtt()">Save attendance</button></div>`},
+          marks(){return `<button class="b" onclick="addMark()">+ Add marks</button><div class="card" style="margin-top:10px"><h3>SGPA / CGPA</h3>${S.students.map(s=>{const l=S.marks.filter(m=>m.sid===s.id),sems=[...new Set(l.map(m=>m.sem))].sort();return `<div class="row"><div>${esc(s.name)}<div class="m">${sems.map(x=>`Sem ${x}: ${gpa(l.filter(m=>m.sem==x))}`).join(' · ')||'No marks'}</div></div><b>CGPA ${gpa(l)}</b></div>`}).join('')}</div><div class="card"><h3>Entries</h3>${S.marks.map(m=>`<div class="row"><span>${esc(stu(m.sid).name)}<div class="m">Sem ${m.sem} · ${esc(m.subject)} · ${m.credits}cr · ${m.marks} (GP ${gp(+m.marks)})</div></span><button class="b d" onclick="del('marks','${m.id}')">✕</button></div>`).join('')}</div>`},
+          tt(){const ed=U.role!=='student';return (ed?`<button class="b" onclick="addTT()">+ Add class</button>`:'')+`<div class="card" style="margin-top:10px">${['Mon','Tue','Wed','Thu','Fri','Sat'].map(D=>S.tt.filter(t=>t.day===D).sort((a,b)=>a.time.localeCompare(b.time)).map(t=>`<div class="row"><div><b>${D}</b> ${t.time} — ${esc(t.subject)}<div class="m">${esc(t.room)} · ${esc(t.faculty)}</div></div>${ed?`<button class="b d" onclick="del('tt','${t.id}')">✕</button>`:''}</div>`).join('')).join('')||'<span class="m">No classes</span>'}</div>`},
+          notices(){return (U.role==='admin'?`<button class="b" onclick="addNot()">+ Post notice</button>`:'')+`<div class="card" style="margin-top:10px">${S.notices.slice().reverse().map(n=>`<div class="row"><div>${esc(n.t)}<div class="m">${n.d}</div></div>${U.role==='admin'?`<button class="b d" onclick="del('notices','${n.id}')">✕</button>`:''}</div>`).join('')}</div>`},
+          my(){const s=stu(U.sid),l=S.marks.filter(m=>m.sid===s.id);return `<div class="card"><h3>${esc(s.name)}</h3><div class="m">${esc(s.roll)} · ${esc(s.course)} · Sem ${s.sem}<br>Guardian: ${esc(s.guardian)}<br>Phone: ${esc(s.phone)}</div></div><div class="k"><div><b>${attPct(s.id)??'-'}%</b>Attendance</div><div><b>${gpa(l)}</b>CGPA</div><div><b>₹${s.paid}</b>Fees paid</div><div><b>₹${s.fee-s.paid}</b>Fees due</div></div><div class="card" style="margin-top:10px"><h3>Results</h3>${l.map(m=>`<div class="row"><span>Sem ${m.sem} · ${esc(m.subject)}</span><span>${m.marks} (GP ${gp(+m.marks)})</span></div>`).join('')||'<span class="m">No results</span>'}</div>`}};
+          const stuOpt=()=>S.students.map(s=>[s.id,s.name+' ('+s.roll+')']);
+          window.addStu=()=>form('Add student',[['name','Name'],['roll','Roll no.'],['course','Course'],['sem','Semester','number'],['phone','Phone','tel'],['guardian','Guardian'],['fee','Total fee (₹)','number']],v=>S.students.push({id:uid(),...v,sem:+v.sem,fee:+v.fee,paid:0}));
+          window.addFac=()=>form('Add faculty',[['name','Name'],['dept','Department'],['subject','Subject'],['phone','Phone','tel']],v=>S.faculty.push({id:uid(),...v}));
+          window.addMark=()=>form('Add marks',[['sid','Student','select',stuOpt()],['sem','Semester','number'],['subject','Subject'],['credits','Credits','number'],['marks','Marks (0-100)','number']],v=>S.marks.push({id:uid(),...v,sem:+v.sem,credits:+v.credits,marks:+v.marks}));
+          window.addTT=()=>form('Add class',[['day','Day','select',['Mon','Tue','Wed','Thu','Fri','Sat'].map(x=>[x,x])],['time','Time','time'],['subject','Subject'],['room','Room'],['faculty','Faculty']],v=>S.tt.push({id:uid(),...v}));
+          window.addNot=()=>form('Post notice',[['t','Notice']],v=>S.notices.push({id:uid(),t:v.t,d:today()}));
+          window.mark=(id,v)=>{S.att[AD]=S.att[AD]||{};S.students.forEach(s=>{S.att[AD][s.id]=S.att[AD][s.id]||'P'});S.att[AD][id]=v;render()};
+          window.saveAtt=()=>{S.att[AD]=S.att[AD]||{};S.students.forEach(s=>{S.att[AD][s.id]=S.att[AD][s.id]||'P'});save();alert('Saved');render()};
+          window.del=del;
+          function render(){if(!U)return login();$('#app').innerHTML=`<header><b>Acadnox ERP · ${esc(U.role)}</b><button onclick="U=null;render()">Logout</button></header><main>${V_[V]()}</main><nav>${NAV[U.role].map(([k,l])=>`<a class="${k===V?'on':''}" onclick="V='${k}';render()">${l}</a>`).join('')}</nav>`}
+          render();
+          </script></body></html>
+          ACX_EOF
+          gradle assembleDebug --no-daemon --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk $GITHUB_WORKSPACE/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app-debug.apk
+          
